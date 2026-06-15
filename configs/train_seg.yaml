@@ -1,0 +1,48 @@
+# Segmentation training configuration
+
+# Data
+json_path: "data/brats_ssa_2024_5fold.json"
+npy_dir: "data/processed"
+
+# Architecture: "sa_unet3d" or "mednext"
+architecture: "sa_unet3d"
+
+# SA-UNet3D settings
+base_ch: 16
+block_size: 7
+keep_prob: 0.9
+
+# MedNeXt settings (used when architecture: "mednext")
+mednext_size: "B"        # S / B / M / L
+mednext_ksize: 3         # 3 or 5
+
+# Input / output
+in_channels: 4
+out_channels: 3
+
+# Training
+seed: 42
+max_epochs: 100
+batch_size: 2
+num_workers: 4
+pin_memory: true
+check_val_every_n_epoch: 1
+n_gpus: 1
+
+# Augmentation (1=standard, 2=medium, 3=aggressive)
+aug_type: 3
+roi: [128, 128, 128]
+
+# Loss
+deep_sup: false
+
+# Optimizer (schedule-free AdamW)
+lr: 0.0027
+weight_decay: 0.0
+
+# Inference
+sw_batch_size: 4
+infer_overlap: 0.5
+
+# Logging
+wandb_project: "brain-tumor-seg"

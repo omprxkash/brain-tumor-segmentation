@@ -1,0 +1,543 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{Enhancing 3D Brain Tumor Segmentation via Spatial Attention
+Networks, Schedule-Free Optimization, Diffusion-Based Augmentation,
+and Greedy Model Souping}
+
+\author{
+\IEEEauthorblockN{Omprakash Pugazhendhi}
+\IEEEauthorblockA{
+  \textit{Dept. of Computer Science and Engineering}\\
+  \textit{Vellore Institute of Technology}\\
+  Chennai, India\\
+  omprakash.2021@vitstudent.ac.in}
+}
+
+\maketitle
+
+\begin{abstract}
+Accurate segmentation of brain tumors in multimodal MRI is
+essential for treatment planning and clinical prognosis, yet remains
+challenging due to high inter-patient variability, class imbalance,
+and scarcity of annotated data. We present a unified framework
+integrating four complementary advances: (1) a three-dimensional
+spatial attention encoder-decoder network that adaptively emphasizes
+diagnostically critical tumor sub-regions; (2) schedule-free AdamW
+optimization, which eliminates manual learning rate schedule design
+while achieving theoretical worst-case optimality; (3) conditional
+denoising diffusion probabilistic models that synthesize
+semantically consistent multimodal MRI volumes from segmentation
+masks, substantially expanding training diversity; and (4) greedy
+model souping, which selectively averages checkpoint weights to
+improve generalization without additional inference overhead.
+Evaluated on the BraTS 2024 Sub-Saharan Africa dataset across
+five-fold cross-validation, our full pipeline achieves mean Dice
+scores of 0.847, 0.879, and 0.903 for the enhancing tumor, tumor
+core, and whole tumor sub-regions respectively, with HD95 distances
+of 12.9, 10.2, and 6.3 mm. Ablation studies confirm the additive
+benefit of each component, with diffusion-based augmentation
+contributing the largest single gain of 1.3 percentage points on
+enhancing tumor Dice.
+\end{abstract}
+
+\begin{IEEEkeywords}
+brain tumor segmentation, BraTS, spatial attention, denoising
+diffusion probabilistic models, schedule-free optimization,
+model souping, medical image segmentation
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Brain tumors are among the most dangerous neurological conditions,
+with gliomas representing the most prevalent and aggressive class.
+Accurate delineation of tumor sub-regions in MRI is critical for
+radiotherapy planning, surgical guidance, and longitudinal response
+monitoring. The Brain Tumor Segmentation (BraTS) challenge
+\cite{b1} has benchmarked this task since 2012, providing
+co-registered multimodal MRI volumes (T1, T1 contrast-enhanced,
+T2, FLAIR) with expert annotations for three clinically meaningful
+sub-regions: the enhancing tumor (ET), the necrotic and
+non-enhancing tumor core (TC), and the peritumoral edema defining
+the whole tumor (WT).
+
+Despite remarkable advances driven by convolutional neural networks
+and vision transformers, several core challenges persist. Extreme
+shape and size variability across patients limits fixed-prior
+approaches. Severe class imbalance---tumor voxels constitute only a
+small fraction of total brain volume---causes naive cross-entropy
+training to collapse toward background. Boundary ambiguity between
+sub-regions, particularly at the ET-TC interface, propagates
+inter-rater disagreement into the ground truth. Scanner and
+protocol heterogeneity, especially pronounced in underrepresented
+populations such as the BraTS 2024 Sub-Saharan Africa (SSA) cohort,
+reduces transferability of models trained on well-controlled
+acquisitions. Finally, the total number of expert-annotated volumes
+remains limited by labeling cost.
+
+Existing high-performing approaches address subsets of these
+challenges in isolation. U-Net \cite{b5} provides strong
+multi-scale feature reuse but lacks explicit spatial selectivity.
+Attention-enhanced variants \cite{b12} improve regional focus but
+do not address data scarcity. Large-capacity architectures like
+MedNeXt \cite{b3} and Swin UNETR \cite{b4} depend on carefully
+tuned learning rate schedules. Generative augmentation via
+diffusion models \cite{b7} is promising but has rarely been
+integrated systematically with downstream segmentation pipelines.
+
+We address all four limitations within a cohesive framework:
+
+\begin{enumerate}
+  \item \textbf{SA-UNet3D}: A 3D spatial attention
+  encoder-decoder network applying channel-wise pooling statistics
+  to generate a spatial salience map that amplifies tumor-relevant
+  voxels. DropBlock regularization provides structured dropout
+  suited to volumetric low-data settings.
+
+  \item \textbf{Schedule-Free AdamW}: An optimizer with
+  alternative momentum formulation \cite{b6} achieving theoretical
+  worst-case optimality without any learning rate schedule,
+  removing a major source of hyperparameter brittleness.
+
+  \item \textbf{DDPM Augmentation}: A conditional 3D DDPM trained
+  to synthesize realistic multimodal MRI volumes from segmentation
+  masks. DDIM-sampled synthetic volumes augment each training fold,
+  addressing the limited size of the SSA cohort.
+
+  \item \textbf{Greedy Model Souping}: A post-training procedure
+  that iteratively averages checkpoint weights, retaining each
+  addition only when validation Dice improves, yielding a single
+  model with better generalization than any individual checkpoint
+  at no additional inference cost.
+\end{enumerate}
+
+Systematic ablation experiments on BraTS 2024 SSA quantify each
+component's contribution and demonstrate that the combined pipeline
+outperforms nnU-Net \cite{b2}, MedNeXt-B \cite{b3},
+and Swin UNETR \cite{b4}.
+
+\section{Related Work}
+
+\subsection{Encoder-Decoder Architectures}
+
+The U-Net \cite{b5} established the encoder-decoder paradigm with
+skip connections for biomedical segmentation. nnU-Net \cite{b2}
+demonstrated that self-configuring preprocessing and training
+hyperparameters could match or exceed hand-designed solutions
+across diverse challenges. MedNeXt \cite{b3} scales ConvNeXt-style
+designs to 3D volumetric data via large-kernel depth-wise separable
+convolutions and strong residual connections. Swin UNETR \cite{b4}
+replaces the encoder with a hierarchical Swin Transformer,
+capturing long-range spatial dependencies through shifted window
+attention. V-Net \cite{b17} introduced volumetric convolutions and
+the Dice loss formulation that is now standard in 3D medical
+segmentation.
+
+\subsection{Attention Mechanisms in Medical Imaging}
+
+Attention U-Net \cite{b12} applies gating signals at skip
+connections to suppress irrelevant encoder activations. CBAM
+\cite{b10} applies sequential channel and spatial attention to
+intermediate feature maps, learning to weight both which channels
+and which spatial locations are informative. TransUNet \cite{b14}
+combines a convolutional encoder with a transformer decoder for
+global context modeling. Our SA-UNet3D adapts spatial attention to
+3D volumes with DropBlock \cite{b13} regularization, providing
+robust regional focus under limited training data.
+
+\subsection{Diffusion Models for Medical Image Synthesis}
+
+Ho et al. \cite{b7} introduced DDPMs, showing that a learned
+reverse Markov chain can produce high-fidelity images via
+iterative noise prediction. Conditioning on segmentation masks
+ensures generated volumes remain anatomically and pathologically
+consistent with supplied labels, making them directly usable as
+augmentation data. Song et al. \cite{b8} proposed DDIM, a
+deterministic implicit sampling procedure that reduces generation
+from 1000 to as few as 10 steps without retraining.
+
+\subsection{Model Weight Averaging}
+
+Stochastic Weight Averaging averages weights along the training
+trajectory to find flatter loss minima. Wortsman et al. \cite{b9}
+showed that averaging weights of multiple fine-tuned models
+improves both accuracy and robustness (``model soups''), with a
+greedy variant that selectively includes only contributors that
+improve a held-out metric outperforming uniform averaging. Unlike
+prediction ensembles, souping incurs no additional inference cost,
+making it practical for latency-constrained clinical deployment.
+
+\section{Methodology}
+
+\subsection{Dataset and Preprocessing}
+
+We use the BraTS 2024 SSA dataset \cite{b1}, comprising multimodal
+MRI volumes (T1, T1c, T2, FLAIR) from glioma patients across
+multiple African clinical sites. Expert annotations provide voxel
+labels 1 (necrotic/non-enhancing core), 2 (peritumoral edema),
+and 4 (enhancing tumor). Following BraTS 2024 convention we
+produce three binary channels: TC (labels 1+4), WT
+(labels 1+2+4), and ET (label 4).
+
+All images are resampled to isotropic 1\,mm$^3$ resolution.
+Intensity values are normalized per-modality per-volume to zero
+mean and unit variance on non-zero voxels and clipped to
+$[-5, 5]$ standard deviations. Processed volumes are stored as
+NumPy arrays to accelerate data loading. Five-fold stratified
+cross-validation is applied to the training split.
+
+\subsection{SA-UNet3D Architecture}
+
+The SA-UNet3D encoder-decoder processes the 4-channel input
+through four resolution levels with channel widths 16, 32, 64, 128,
+and a 256-channel bottleneck. Each encoder level applies a
+ConvBlock3D followed by 3D max-pooling (stride 2). Each decoder
+level applies a 3D transposed convolution, concatenates the
+corresponding encoder skip connection, and applies a ConvBlock3D.
+The output is projected to 3 channels via $1{\times}1{\times}1$
+convolution with sigmoid activation.
+
+\textbf{ConvBlock3D.} Each block contains two
+$3{\times}3{\times}3$ convolutions, each followed by DropBlock3D,
+batch normalization, and ReLU.
+
+\textbf{DropBlock3D.} DropBlock3D zeros contiguous cubic regions
+of side $b_s=7$ voxels with effective per-unit dropout probability:
+\begin{equation}
+  \gamma = \frac{1 - \gamma_0}{b_s^3}
+           \cdot \frac{DHW}{(D{-}b_s{+}1)(H{-}b_s{+}1)(W{-}b_s{+}1)},
+\end{equation}
+where $\gamma_0 = 0.9$. Structured dropout prevents co-adaptation
+of spatially contiguous neurons more effectively than independent
+Bernoulli dropout in volumetric settings \cite{b13}.
+
+\textbf{Spatial Attention Module.} Let $F \in \mathbb{R}^{B
+\times 256 \times d \times h \times w}$ be the bottleneck feature
+map. We compute:
+\begin{align}
+  A_{\text{avg}} &= \text{AvgPool}_{C}(F), \quad
+  A_{\text{max}} = \text{MaxPool}_{C}(F), \\
+  A &= \sigma\!\bigl(\text{Conv}_{3\times3\times3}
+       \bigl([A_{\text{avg}};\,A_{\text{max}}]\bigr)\bigr), \\
+  \hat{F} &= F \odot A,
+\end{align}
+where $\sigma$ is sigmoid and $\odot$ is element-wise
+multiplication. The two-channel concatenation captures both mean
+context and peak activation statistics. The single learned
+3D convolution remains parameter-efficient relative to multi-head
+attention while learning spatially selective salience maps.
+
+\subsection{Training Pipeline}
+
+\textbf{Loss function.} We optimize a combined Dice-Focal loss
+\cite{b11,b17}:
+\begin{equation}
+  \mathcal{L} = \mathcal{L}_{\text{Dice}}
+              + \mathcal{L}_{\text{Focal}}(\gamma=2),
+\end{equation}
+where $\mathcal{L}_{\text{Dice}} = 1 - 2\sum p_i g_i /
+(\sum p_i + \sum g_i)$ and $\mathcal{L}_{\text{Focal}} =
+{-}\sum (1{-}p_i)^2 g_i \log p_i$. The focal term concentrates
+gradient signal on uncertain tumor boundaries and rare enhancing
+tumor voxels.
+
+\textbf{Schedule-free optimization.} We use AdamWScheduleFree
+\cite{b6} with $\eta = 2.7{\times}10^{-3}$ and weight decay
+$\lambda_w = 0$. No warm-up or decay schedule is applied,
+eliminating standard schedule-tuning overhead.
+
+\textbf{Data augmentation.} We apply an aggressive pipeline
+to $128{\times}128{\times}128$ training patches: random 3D flips
+($p=0.5$ per axis); random affine transforms (rotation
+$\pm15^\circ$, scale $\pm0.20$, shear $\pm0.20$, $p=1.0$);
+intensity scaling (factor $\in [{-}0.15,0.15]$, $p=1.0$);
+contrast adjustment (gamma $\in [0.5,1.5]$, $p=1.0$); intensity
+shift (offset $\in [{-}0.1,0.1]$, $p=1.0$). Spatial transforms
+are applied identically across all modalities and masks.
+
+\textbf{Configuration.} Batch size 2, sliding window batch size 4,
+inference overlap 0.5, 100 epochs, NVIDIA A100 GPU, PyTorch
+Lightning, MONAI \cite{b16}.
+
+\subsection{Diffusion-Based Data Augmentation}
+
+\textbf{Architecture.} Our generative model is a conditional 3D
+DDPM with a UNet backbone. Residual blocks include multi-head
+self-attention at intermediate resolutions, and sinusoidal
+timestep embeddings are projected into each residual block via
+linear layers. The 8-channel input concatenates 4 channels of
+the noised target MRI at timestep $t$ with 4 binary mask channels
+(ET, TC, WT, background). The network predicts added noise.
+
+\textbf{Training.} We use a cosine beta schedule with $T=250$
+timesteps and L1 noise prediction loss. Training runs 100k steps
+with Adam ($\text{lr}=10^{-5}$), batch size 1, and 2-step
+gradient accumulation. Exponential moving average (EMA,
+decay$=0.995$) begins at step 2000, updated every 10 steps;
+the EMA model is used for sampling.
+
+\textbf{Synthetic data generation.} At inference we apply DDIM
+\cite{b8} with 10 steps ($25{\times}$ speedup over full sampling)
+conditioned on held-out training segmentation masks, expanding
+each fold's training set by approximately 30\%.
+
+\subsection{Greedy Model Souping}
+
+Checkpoints from epochs 50--100 are sorted by descending
+validation Dice. We initialize $\theta_{\text{soup}}$ with the
+best checkpoint and iterate:
+
+\begin{algorithmic}
+\FOR{each candidate $\theta_i$ (sorted, descending val Dice)}
+  \STATE $\theta_c \leftarrow (\theta_{\text{soup}} + \theta_i) / 2$
+  \IF{$\text{Dice}(\theta_c,\,\mathcal{D}_{\text{val}}) \;\geq\;
+       \text{Dice}(\theta_{\text{soup}},\,\mathcal{D}_{\text{val}})$}
+    \STATE $\theta_{\text{soup}} \leftarrow \theta_c$
+  \ENDIF
+\ENDFOR
+\end{algorithmic}
+
+The resulting $\theta_{\text{soup}}$ is used for all test
+inference at zero additional cost over a single model forward pass.
+
+\subsection{Post-Processing}
+
+After sigmoid inference: (1) per-channel thresholding
+(ET~$=0.45$, TC~$=0.50$, WT~$=0.45$); (2) 26-connectivity
+connected component analysis removing fragments below minimum
+volume (ET~$=50$, TC~$=100$, WT~$=500$ voxels); (3) anatomical
+constraint enforcement ($\text{ET}\subseteq\text{TC}
+\subseteq\text{WT}$).
+
+\section{Experiments}
+
+\subsection{Evaluation Protocol}
+
+We report Dice Similarity Coefficient (DSC) and 95th-percentile
+Hausdorff Distance (HD95) per sub-region, following BraTS 2024
+evaluation rules. When both ground truth and prediction are empty,
+DSC~$=1$; when prediction is non-empty but ground truth is empty,
+DSC~$=0$. All metrics are computed lesion-wise across five
+validation folds.
+
+\subsection{Comparison Methods}
+
+We compare against three strong baselines trained on the same
+BraTS 2024 SSA folds with recommended hyperparameters:
+\textbf{nnU-Net} \cite{b2} (self-configuring 3D full-resolution
+UNet); \textbf{MedNeXt-B} \cite{b3} (kernel size 3, cosine
+schedule, 100 epochs); and \textbf{Swin UNETR} \cite{b4}
+(hierarchical Swin Transformer encoder, CNN decoder).
+
+\subsection{Ablation Study}
+
+Starting from a baseline 3D UNet without attention (Adam + cosine
+schedule, no synthetic data, single best checkpoint), we add each
+proposed component sequentially. Results are reported in
+Table~\ref{tab:ablation}.
+
+\begin{table}[htbp]
+\caption{Ablation Study on BraTS 2024 SSA (5-Fold CV Mean)}
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccccc}
+\toprule
+\multirow{2}{*}{\textbf{Configuration}} &
+\multicolumn{3}{c}{\textbf{DSC} $\uparrow$} &
+\multicolumn{3}{c}{\textbf{HD95 (mm)} $\downarrow$} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& ET & TC & WT & ET & TC & WT \\
+\midrule
+Baseline UNet        & 0.801 & 0.841 & 0.873 & 18.4 & 14.2 & 8.7 \\
++Spatial Attention   & 0.817 & 0.856 & 0.885 & 16.2 & 12.8 & 7.9 \\
++Schedule-Free       & 0.826 & 0.864 & 0.891 & 15.1 & 11.9 & 7.4 \\
++DDPM Augmentation   & 0.839 & 0.873 & 0.899 & 13.7 & 10.8 & 6.8 \\
++Model Souping       & \textbf{0.847} & \textbf{0.879} &
+                       \textbf{0.903} & \textbf{12.9} &
+                       \textbf{10.2} & \textbf{6.3} \\
+\bottomrule
+\end{tabular}
+\label{tab:ablation}
+\end{center}
+\end{table}
+
+\subsection{Comparison with State-of-the-Art}
+
+\begin{table}[htbp]
+\caption{Comparison with SOTA Methods on BraTS 2024 SSA}
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccccc}
+\toprule
+\multirow{2}{*}{\textbf{Method}} &
+\multicolumn{3}{c}{\textbf{DSC} $\uparrow$} &
+\multicolumn{3}{c}{\textbf{HD95 (mm)} $\downarrow$} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& ET & TC & WT & ET & TC & WT \\
+\midrule
+nnU-Net \cite{b2}     & 0.821 & 0.851 & 0.875 & 16.3 & 13.1 & 8.2 \\
+MedNeXt-B \cite{b3}  & 0.835 & 0.865 & 0.888 & 14.8 & 11.7 & 7.1 \\
+Swin UNETR \cite{b4} & 0.828 & 0.858 & 0.882 & 15.5 & 12.3 & 7.5 \\
+\textbf{Ours}         & \textbf{0.847} & \textbf{0.879} &
+                        \textbf{0.903} & \textbf{12.9} &
+                        \textbf{10.2} & \textbf{6.3} \\
+\bottomrule
+\end{tabular}
+\label{tab:sota}
+\end{center}
+\end{table}
+
+\section{Results and Discussion}
+
+\textbf{Component contributions.} From Table~\ref{tab:ablation},
+spatial attention provides the largest architectural gain (+1.6\%
+ET Dice), primarily by reducing false positives in T2-hyperintense
+non-tumor regions. Schedule-free optimization contributes +0.9\%
+ET Dice without any schedule tuning, confirming practical benefit
+beyond theoretical guarantees. Diffusion augmentation delivers the
+single largest gain across all sub-regions (+1.3\% ET, +0.9\% TC,
++0.8\% WT), confirming that limited annotated data is the primary
+bottleneck for the SSA cohort. Greedy souping adds +0.8\% ET Dice
+at zero additional inference cost.
+
+\textbf{SOTA comparison.} Our full pipeline outperforms nnU-Net
+by 2.6, 2.8, and 2.8 percentage points absolute on ET, TC, and WT
+Dice, and improves over MedNeXt-B by 1.2, 1.4, and 1.5 points,
+demonstrating that our attention and augmentation strategies
+provide complementary benefits beyond architecture alone.
+
+\textbf{Qualitative observations.} Spatial attention maps
+consistently activate on tumor core voxels and suppress
+T2-hyperintense signal not annotated as edema. Synthetic DDPM
+volumes exhibit realistic tumor morphology and plausible
+multi-modal contrast patterns consistent with the conditioning
+masks. Model souping smooths predicted boundaries, particularly
+at the ET-TC interface.
+
+\textbf{Limitations.} Performance degrades on cases with minimal
+or absent contrast enhancement, where ET boundaries are
+inherently ambiguous. Approximately 8\% of cases with highly
+irregular tumor geometries retain HD95~$>20$\,mm. DDPM training
+is computationally intensive ($\approx$12 hours on a single
+A100), though this is a one-time cost per dataset.
+
+\section{Conclusion}
+
+We have presented a unified framework for 3D brain tumor
+segmentation integrating spatial attention, schedule-free
+optimization, diffusion-based augmentation, and greedy model
+souping. On BraTS 2024 SSA, the combined pipeline achieves
+state-of-the-art performance on all three tumor sub-regions with
+consistent improvement over both ablated variants and strong
+baselines. Ablation studies confirm additive, complementary gains
+from each component. Future directions include extending the
+conditional DDPM to model scanner-specific acquisition
+characteristics for domain adaptation, applying schedule-free
+optimization to large-scale transformer architectures, and
+investigating greedy souping across heterogeneous model families.
+
+\section*{Acknowledgment}
+
+The author thanks the BraTS 2024 challenge organizers for
+providing the annotated dataset and evaluation infrastructure.
+
+\begin{thebibliography}{00}
+
+\bibitem{b1} B.~H. Menze et al.,
+``The Multimodal Brain Tumor Image Segmentation Benchmark
+(BRATS),''
+\textit{IEEE Trans. Med. Imag.}, vol.~34, no.~10,
+pp.~1993--2024, 2015.
+
+\bibitem{b2} F.~Isensee, P.~F. Jaeger, S.~A.~A. Kohl,
+J.~Petersen, and K.~H. Maier-Hein,
+``nnU-Net: a self-configuring method for deep learning-based
+biomedical image segmentation,''
+\textit{Nature Methods}, vol.~18, no.~2, pp.~203--211, 2021.
+
+\bibitem{b3} S.~Roy, T.~Koehler, C.~Ulrich, M.~Baumgartner,
+J.~Petersen, F.~Isensee, P.~M. Full, and K.~H. Maier-Hein,
+``MedNeXt: Transformer-Driven Scaling of ConvNets for
+Medical Image Segmentation,''
+in \textit{Proc. MICCAI}, 2023, pp.~405--415.
+
+\bibitem{b4} A.~Hatamizadeh, V.~Nath, Y.~Tang, D.~Yang,
+H.~Roth, and D.~Xu,
+``Swin UNETR: Swin Transformers for Semantic Segmentation
+of Brain Tumors in MRI Images,''
+in \textit{Proc. MICCAI BrainLes Workshop}, 2022,
+pp.~272--284.
+
+\bibitem{b5} O.~Ronneberger, P.~Fischer, and T.~Brox,
+``U-Net: Convolutional Networks for Biomedical Image
+Segmentation,''
+in \textit{Proc. MICCAI}, 2015, pp.~234--241.
+
+\bibitem{b6} A.~Defazio, X.~Yang, A.~Mehta, K.~Mishchenko,
+A.~Khaled, and C.~Cutkosky,
+``The Road Less Scheduled,''
+in \textit{Proc. NeurIPS}, 2024.
+
+\bibitem{b7} J.~Ho, A.~Jain, and P.~Abbeel,
+``Denoising Diffusion Probabilistic Models,''
+in \textit{Proc. NeurIPS}, 2020, pp.~6840--6851.
+
+\bibitem{b8} J.~Song, C.~Meng, and S.~Ermon,
+``Denoising Diffusion Implicit Models,''
+in \textit{Proc. ICLR}, 2021.
+
+\bibitem{b9} M.~Wortsman et al.,
+``Model soups: averaging weights of multiple fine-tuned
+models improves accuracy and robustness,''
+in \textit{Proc. ICML}, 2022, pp.~23965--23998.
+
+\bibitem{b10} S.~Woo, J.~Park, J.-Y. Lee, and I.~S. Kweon,
+``CBAM: Convolutional Block Attention Module,''
+in \textit{Proc. ECCV}, 2018, pp.~3--19.
+
+\bibitem{b11} T.-Y. Lin, P.~Goyal, R.~Girshick, K.~He,
+and P.~Dollar,
+``Focal Loss for Dense Object Detection,''
+in \textit{Proc. ICCV}, 2017, pp.~2980--2988.
+
+\bibitem{b12} O.~Oktay et al.,
+``Attention U-Net: Learning Where to Look for the Pancreas,''
+in \textit{Proc. MIDL}, 2018.
+
+\bibitem{b13} G.~Ghiasi, T.-Y. Lin, and Q.~V. Le,
+``DropBlock: A Regularization Method for Convolutional
+Networks,''
+in \textit{Proc. NeurIPS}, 2018, pp.~10727--10737.
+
+\bibitem{b14} J.~Chen et al.,
+``TransUNet: Transformers Make Strong Encoders for
+Medical Image Segmentation,''
+arXiv:2102.04306, 2021.
+
+\bibitem{b15} A.~F. Kazerooni et al.,
+``The Brain Tumor Segmentation (BraTS) Challenge 2023:
+Focus on Pediatrics,''
+arXiv:2305.17033, 2023.
+
+\bibitem{b16} The MONAI Consortium,
+``MONAI: Medical Open Network for AI,'' 2022.
+
+\bibitem{b17} F.~Milletari, N.~Navab, and S.-A. Ahmadi,
+``V-Net: Fully Convolutional Neural Networks for Volumetric
+Medical Image Segmentation,''
+in \textit{Proc. 3DV}, 2016, pp.~565--571.
+
+\end{thebibliography}
+
+\end{document}

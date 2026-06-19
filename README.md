@@ -8,12 +8,7 @@
 
 ## Paper
 
-The full research paper is available in this repository:
-
-- **PDF:** [`paper/brain_tumor_segmentation.pdf`](paper/brain_tumor_segmentation.pdf)
-- **LaTeX source:** [`paper/paper.tex`](paper/paper.tex)
-
-To recompile, paste `paper/paper.tex` into [Overleaf](https://www.overleaf.com) and click Compile.
+Read the full research paper here: [`paper/brain_tumor_segmentation.pdf`](paper/brain_tumor_segmentation.pdf)
 
 ---
 
